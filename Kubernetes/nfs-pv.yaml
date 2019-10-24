@@ -1,0 +1,17 @@
+#kubectl apply -f nfs-pv.yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nfs-pv
+spec:
+  capacity:
+    storage: 15Gi
+  volumeMode: Filesystem
+  ##storageClassName: slow
+  ##persistentVolumeReclaimPolicy: Retain
+  accessModes:
+    - ReadWriteMany
+  nfs:
+    server: kubernetes.nfs
+    path: "/home/kubernetes/volumes"
+    

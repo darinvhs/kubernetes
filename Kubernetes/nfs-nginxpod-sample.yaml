@@ -1,0 +1,19 @@
+#kubectl apply -f nfs-nginxpod-sample.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nfs-pv-pod
+spec:
+  volumes:
+    - name: nfs-pv-storage
+      persistentVolumeClaim:
+        claimName: nfs-pvc
+  containers:
+    - name: nfs-pv-container
+      image: nginx
+      ports:
+        - containerPort: 80
+          name: "http-server"
+      volumeMounts:
+        - mountPath: "/usr/share/nginx/html"
+          name: nfs-pv-storage

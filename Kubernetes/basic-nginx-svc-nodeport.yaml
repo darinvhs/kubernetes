@@ -1,0 +1,21 @@
+#kubectl expose deployment nginx01 --port=80 --protocol=TCP --type=NodePort
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: nginx01
+  name: nginx01
+  namespace: default
+spec:
+  clusterIP: 10.111.70.90
+  externalTrafficPolicy: Cluster
+  ports:
+  - nodePort: 32056
+    port: 80
+    protocol: TCP
+    targetPort: 80
+  selector:
+    app: nginx01
+  type: NodePort
+status:
+  loadBalancer: {}
