@@ -1,0 +1,240 @@
+How to secure your ingress-nginx-controller using letsencrypt (cert-manager)
+
+PREPARATION
+1. Prepare your k8s cluster.
+2. Deploy ingress controller using nginx
+   master$ ln -s /usr/bin/kubectl /usr/bin/k
+   master$ k apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.0.0-beta.3/deploy/static/provider/cloud/deploy.yaml 
+   
+3. Makesure deployment and service of your ingress-controller is running, such below:
+   master$ k get all -n ingress-nginx
+    NAME                                            READY   STATUS      RESTARTS   AGE
+    pod/ingress-nginx-admission-create--1-m5hsg     0/1     Completed   0          2d17h
+    pod/ingress-nginx-admission-patch--1-8kp7j      0/1     Completed   0          2d17h
+    pod/ingress-nginx-controller-76dcf4d6c8-s4xjs   1/1     Running     0          2d17h
+
+    NAME                                         TYPE           CLUSTER-IP     EXTERNAL-IP   PORT(S)                      AGE
+    service/ingress-nginx-controller             LoadBalancer   10.102.139.3   <pending>     80:31822/TCP,443:31805/TCP   2d17h
+    service/ingress-nginx-controller-admission   ClusterIP      10.111.214.7   <none>        443/TCP                      2d17h
+
+    NAME                                       READY   UP-TO-DATE   AVAILABLE   AGE
+    deployment.apps/ingress-nginx-controller   1/1     1            1           2d17h
+
+    NAME                                                  DESIRED   CURRENT   READY   AGE
+    replicaset.apps/ingress-nginx-controller-76dcf4d6c8   1         1         1       2d17h
+
+    NAME                                       COMPLETIONS   DURATION   AGE
+    job.batch/ingress-nginx-admission-create   1/1           3s         2d17h
+    job.batch/ingress-nginx-admission-patch    1/1           3s         2d17h
+
+4. Makesure there is no error on controller:
+   master$ while true; do k logs -n ingress-nginx deployment.apps/ingress-nginx-controller; sleep 10; done
+
+5. Grep ingress-controller port number
+   master$ k describe svc -n ingress-nginx ingress-nginx-controller | grep -i port
+    
+    Port:                     http  80/TCP
+    TargetPort:               http/TCP
+    NodePort:                 http  31822/TCP
+    Port:                     https  443/TCP
+    TargetPort:               https/TCP
+    NodePort:                 https  31805/TCP
+    HealthCheck NodePort:     31418
+    
+ 6. Configure your L4 LoadBalancer to use above port as backend
+    lb$ less /etc/nginx/nginx.conf
+    stream {
+      server {
+          listen 80;
+          proxy_pass backend_http;
+      }
+
+      upstream backend_http {
+          server 10.1.2.204:31822;
+          server 10.1.2.204:31822;
+      }
+
+      server {
+          listen 443;
+          proxy_pass backend_https;
+      }
+
+      upstream backend_https {
+          server 10.1.2.204:31805;
+          server 10.1.2.205:31805;
+      }
+   }
+  
+  7. Deploy cert-manager
+     master$ k apply -f https://github.com/jetstack/cert-manager/releases/latest/download/cert-manager.yaml
+  
+  8. Makesure deployment and service of your cert-manager is running, such below:
+     master$ k get all -n cert-manager
+      NAME                                           READY   STATUS    RESTARTS   AGE
+      pod/cert-manager-7d59dd4888-5v7wx              1/1     Running   0          2d12h
+      pod/cert-manager-cainjector-85899d45d9-5gfw9   1/1     Running   0          2d12h
+      pod/cert-manager-webhook-84fcdcd5d-lrth8       1/1     Running   0          2d12h
+
+      NAME                           TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)    AGE
+      service/cert-manager           ClusterIP   10.100.1.202    <none>        9402/TCP   2d12h
+      service/cert-manager-webhook   ClusterIP   10.99.222.234   <none>        443/TCP    2d12h
+
+      NAME                                      READY   UP-TO-DATE   AVAILABLE   AGE
+      deployment.apps/cert-manager              1/1     1            1           2d12h
+      deployment.apps/cert-manager-cainjector   1/1     1            1           2d12h
+      deployment.apps/cert-manager-webhook      1/1     1            1           2d12h
+
+      NAME                                                 DESIRED   CURRENT   READY   AGE
+      replicaset.apps/cert-manager-7d59dd4888              1         1         1       2d12h
+      replicaset.apps/cert-manager-cainjector-85899d45d9   1         1         1       2d12h
+      replicaset.apps/cert-manager-webhook-84fcdcd5d       1         1         1       2d12h
+      
+ 9. Deploy acme issuer
+    9.1 staging for testing
+    master$ k apply -f letsencrypt-staging.yaml
+      apiVersion: cert-manager.io/v1
+      kind: ClusterIssuer
+      metadata:
+        name: letsencrypt-staging
+      spec:
+        acme:
+          # You must replace this email address with your own.
+          # Let's Encrypt will use this to contact you about expiring
+          # certificates, and issues related to your account.
+          email: darin@kubernetes.id
+          server: https://acme-staging-v02.api.letsencrypt.org/directory
+          privateKeySecretRef:
+            # Secret resource that will be used to store the account's private key.
+            name: example-issuer-account-key
+          # Add a single challenge solver, HTTP01 using nginx
+          solvers:
+          - http01:
+              ingress:
+                class: nginx
+
+    9.2 Production (there is limitation, the different is just in server detail)
+    master$ k apply -f letsencrypt-prod.yaml
+      apiVersion: cert-manager.io/v1
+      kind: ClusterIssuer
+      metadata:
+        name: letsencrypt-staging
+      spec:
+        acme:
+          # You must replace this email address with your own.
+          # Let's Encrypt will use this to contact you about expiring
+          # certificates, and issues related to your account.
+          email: darin@kubernetes.id
+          server: https://acme-v02.api.letsencrypt.org/directory
+          privateKeySecretRef:
+            # Secret resource that will be used to store the account's private key.
+            name: example-issuer-account-key
+          # Add a single challenge solver, HTTP01 using nginx
+          solvers:
+          - http01:
+              ingress:
+                class: nginx
+                
+     
+TESTING YOUR CERT-MANAGER
+1. Deploy your dummy apps
+   master$ k apply -f apache.yaml
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: apache
+      labels:
+        app: apache
+    spec:
+      replicas: 3
+      selector:
+        matchLabels:
+          app: apache
+      template:
+        metadata:
+          labels:
+            app: apache
+        spec:
+          containers:
+          - name: httpd
+            image: httpd:latest
+            ports:
+            - containerPort: 80
+
+2. Expose your deployment using clusterIP.
+   master$ k expose deployment apache --type ClusterIP
+
+3. Point your domain to LoadBalancer Public IP.
+    
+4. Create ingress for expose your service to the world and generate certificate using staging issuer.
+    master$ k apply -f ingress-tls.yaml
+    apiVersion: networking.k8s.io/v1
+    kind: Ingress
+    metadata:
+      annotations:
+        # add an annotation indicating the issuer to use.
+        cert-manager.io/cluster-issuer: letsencrypt-staging
+      name: oauth
+    spec:
+      rules:
+      - host: oauth.apps-staging.kubernetes.id
+        http:
+          paths:
+          - pathType: Prefix
+            path: /
+            backend:
+              service:
+                name: apache
+                port:
+                  number: 80
+      tls: # < placing a host in the TLS config will determine what ends up in the cert's subjectAltNames
+      - hosts:
+        - oauth.apps-staging.kubernetes.id
+        secretName: myingress-cert # < cert-manager will store the created certificate in this secret..kubernetes.id
+            secretName: oauth
+            
+5. Verify the staging works:
+   5.1 you can access your domain in browser
+   5.2 you can curl your domain from the master node
+   5.3 you can curl the acme challenge url from the master node
+   5.4 your certificate is issued 
+   
+   master$ watch -n1 k describe challenge (it will be gone when your certificate being issued)
+   master$ watch -n1 k describe certificate #see the event details
+    Events:
+    Type    Reason     Age                From          Message
+    ----    ------     ----               ----          -------
+    Normal  Issuing    42m                cert-manager  Issuing certificate as Secret does not exist
+    Normal  Generated  42m                cert-manager  Stored new private key in temporary Secret resource "myingress-cert-rndxs"
+    Normal  Requested  42m                cert-manager  Created new CertificateRequest resource "myingress-cert-kwk9j"
+    Normal  Requested  41m                cert-manager  Created new CertificateRequest resource "myingress-cert-mw87m"
+    Normal  Issuing    35m                cert-manager  Issuing certificate as Secret was previously issued by ClusterIssuer.cert-manager.io/letsencrypt-staging
+
+6. Update your ingress to use production issuer
+   master$ k edit ingress oauth
+   change annotations from this : cert-manager.io/cluster-issuer: letsencrypt-staging
+   to this : cert-manager.io/cluster-issuer: letsencrypt-prod
+   
+7. Describe your certificate again
+    Events:
+      Type    Reason     Age                From          Message
+      ----    ------     ----               ----          -------
+      Normal  Issuing    44m                cert-manager  Issuing certificate as Secret does not exist
+      Normal  Generated  44m                cert-manager  Stored new private key in temporary Secret resource "myingress-cert-rndxs"
+      Normal  Requested  44m                cert-manager  Created new CertificateRequest resource "myingress-cert-kwk9j"
+      Normal  Requested  43m                cert-manager  Created new CertificateRequest resource "myingress-cert-mw87m"
+      Normal  Issuing    37m                cert-manager  Issuing certificate as Secret was previously issued by ClusterIssuer.cert-manager.io/letsencrypt-staging
+      Normal  Reused     37m                cert-manager  Reusing private key stored in existing Secret resource "myingress-cert"
+      Normal  Requested  37m                cert-manager  Created new CertificateRequest resource "myingress-cert-j94rm"
+      Normal  Issuing    36m (x2 over 38m)  cert-manager  The certificate has been successfully issued
+
+8. The latest line showing that your certificate has been reissued.
+9. Try to access your url from browser using https : curl https://oauth.staging-apps.kubernetes.id
+<html><body><h1>It works!</h1></body></html>
+
+Troubleshooting tips:
+1. Monitor your ingress-controller log : while true; do k logs -n ingress-nginx deployment.apps/ingress-nginx-controller; sleep 10; done 
+2. Monitor your certificate issuing statsu : while true; do k describe certificate; sleep 10; done
+3. Monitor challenging request : while true; do k describe challenge; sleep 10; done
+4. Make sure you can access http01 for acme validation inside and outside your cluster
+   
+  
