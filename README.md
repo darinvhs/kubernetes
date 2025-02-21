@@ -1,0 +1,1 @@
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHNEOwOmL/WW5t+zx6sD0W/ZAbKuMxtE3yBTmPgDXspz cardno:20642367 hendarin.ono
